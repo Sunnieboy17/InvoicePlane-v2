@@ -107,7 +107,7 @@ class IvplPanelProvider extends PanelProvider
             ->plugins([
                 ClientsPlugin::make(),
                 CorePlugin::make(),
-                ExpensesPlugin::make(),
+                // ExpensesPlugin::make(),
                 InvoicesPlugin::make(),
                 ProductsPlugin::make(),
                 ProjectsPlugin::make(),
