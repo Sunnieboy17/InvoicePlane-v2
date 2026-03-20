@@ -9,6 +9,14 @@ use Modules\Core\Models\TaxRate;
 
 class TaxRatesSeeder extends AbstractSeeder
 {
+    protected array $germanVatRates = [
+        // Deutschland: §12 UStG
+        ['name' => 'DE Regelsteuersatz 19%', 'code' => 'DE-VAT-STD-19', 'rate' => 19.00],
+        ['name' => 'DE Ermäßigter Steuersatz 7%', 'code' => 'DE-VAT-RED-7', 'rate' => 7.00],
+        // Kleinunternehmerregelung §19 UStG
+        ['name' => 'DE Kleinunternehmer (§19 UStG)', 'code' => 'DE-KLEIN-0', 'rate' => 0.00],
+    ];
+
     protected array $europeanVatRates = [
         ['name' => 'EU Standard VAT (20%)', 'code' => 'EU-VAT-STD-20', 'rate' => 20.00],
         ['name' => 'EU Reduced VAT (10%)', 'code' => 'EU-VAT-RED-10', 'rate' => 10.00],
@@ -59,6 +67,19 @@ class TaxRatesSeeder extends AbstractSeeder
             Log::info("Seeding tax rates for company: {$company->name}");
 
             $ratesToUpsert = [];
+
+            foreach ($this->germanVatRates as $rate) {
+                $ratesToUpsert[] = [
+                    'company_id'    => $company->id,
+                    'name'          => $rate['name'],
+                    'code'          => $rate['code'],
+                    'rate'          => $rate['rate'],
+                    'tax_rate_type' => TaxRateType::EXCLUSIVE->value,
+                    'is_compound'   => false,
+                    'calculate_vat' => $rate['rate'] > 0, // Nur bei > 0 MwSt berechnen
+                    'is_active'     => true,
+                ];
+            }
 
             foreach ($this->europeanVatRates as $rate) {
                 $ratesToUpsert[] = [

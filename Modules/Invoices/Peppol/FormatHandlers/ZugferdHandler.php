@@ -2,6 +2,8 @@
 
 namespace Modules\Invoices\Peppol\FormatHandlers;
 
+use DOMDocument;
+use DOMElement;
 use Modules\Invoices\Models\Invoice;
 use Modules\Invoices\Peppol\Enums\PeppolDocumentFormat;
 
@@ -48,19 +50,427 @@ class ZugferdHandler extends BaseFormatHandler
     /**
      * Generate a string representation of the invoice's ZUGFeRD data.
      *
-     * Converts the given invoice into the format-specific ZUGFeRD structure and returns it as a string.
+     * RB-IMP-12: ZUGFeRD Export MVP
+     * Converts the given invoice into the format-specific ZUGFeRD XML structure.
+     * 
+     * Note: This generates the XML portion only. For full ZUGFeRD compliance,
+     * the XML would need to be embedded in a PDF/A-3 document.
      *
      * @param Invoice $invoice the invoice to convert into ZUGFeRD format
      * @param array   $options optional format-specific options
      *
-     * @return string the pretty-printed JSON representation of the transformed ZUGFeRD data (placeholder for the actual XML embedding)
+     * @return string the generated ZUGFeRD XML document
      */
     public function generateXml(Invoice $invoice, array $options = []): string
     {
         $data = $this->transform($invoice, $options);
+        
+        $dom = new DOMDocument('1.0', 'UTF-8');
+        $dom->formatOutput = true;
+        
+        if ($this->format === PeppolDocumentFormat::ZUGFERD_10) {
+            return $this->generateXml10($dom, $invoice, $data);
+        }
+        
+        return $this->generateXml20($dom, $invoice, $data);
+    }
 
-        // Placeholder - would generate proper ZUGFeRD XML embedded in PDF/A-3
-        return json_encode($data, JSON_PRETTY_PRINT);
+    /**
+     * Generate ZUGFeRD 1.0 XML.
+     */
+    protected function generateXml10(DOMDocument $dom, Invoice $invoice, array $data): string
+    {
+        $root = $dom->createElementNS(
+            'urn:ferd:CrossIndustryDocument:invoice:1p0',
+            'CrossIndustryDocument'
+        );
+        $dom->appendChild($root);
+        
+        // Context
+        $context = $dom->createElement('SpecifiedExchangedDocumentContext');
+        $guideline = $dom->createElement('GuidelineSpecifiedDocumentContextParameter');
+        $guideline->appendChild($dom->createElement('ID', 'urn:ferd:CrossIndustryDocument:invoice:1p0:comfort'));
+        $context->appendChild($guideline);
+        $root->appendChild($context);
+        
+        // Header
+        $header = $dom->createElement('HeaderExchangedDocument');
+        $header->appendChild($dom->createElement('ID', htmlspecialchars($invoice->invoice_number ?? '')));
+        $header->appendChild($dom->createElement('Name', 'RECHNUNG'));
+        $header->appendChild($dom->createElement('TypeCode', '380'));
+        $issueDate = $dom->createElement('IssueDateTime');
+        $dateStr = $dom->createElement('DateTimeString');
+        $dateStr->setAttribute('format', '102');
+        $dateStr->appendChild($dom->createTextNode($invoice->invoiced_at?->format('Ymd') ?? ''));
+        $issueDate->appendChild($dateStr);
+        $header->appendChild($issueDate);
+        $root->appendChild($header);
+        
+        // SupplyChainTradeTransaction
+        $transaction = $dom->createElement('SpecifiedSupplyChainTradeTransaction');
+        $this->buildZugferd10Transaction($dom, $transaction, $invoice);
+        $root->appendChild($transaction);
+        
+        return $dom->saveXML();
+    }
+
+    /**
+     * Build ZUGFeRD 1.0 supply chain trade transaction.
+     */
+    protected function buildZugferd10Transaction(DOMDocument $dom, DOMElement $parent, Invoice $invoice): void
+    {
+        $currencyCode = $this->getCurrencyCode($invoice);
+        
+        // Agreement
+        $agreement = $dom->createElement('ApplicableSupplyChainTradeAgreement');
+        $this->buildZugferd10Seller($dom, $agreement, $invoice);
+        $this->buildZugferd10Buyer($dom, $agreement, $invoice);
+        $parent->appendChild($agreement);
+        
+        // Delivery
+        $delivery = $dom->createElement('ApplicableSupplyChainTradeDelivery');
+        $event = $dom->createElement('ActualDeliverySupplyChainEvent');
+        $eventDate = $dom->createElement('OccurrenceDateTime');
+        $eventDateStr = $dom->createElement('DateTimeString');
+        $eventDateStr->setAttribute('format', '102');
+        $eventDateStr->appendChild($dom->createTextNode($invoice->invoiced_at?->format('Ymd') ?? ''));
+        $eventDate->appendChild($eventDateStr);
+        $event->appendChild($eventDate);
+        $delivery->appendChild($event);
+        $parent->appendChild($delivery);
+        
+        // Settlement
+        $settlement = $dom->createElement('ApplicableSupplyChainTradeSettlement');
+        $settlement->appendChild($dom->createElement('InvoiceCurrencyCode', $currencyCode));
+        
+        $paymentMeans = $dom->createElement('SpecifiedTradeSettlementPaymentMeans');
+        $paymentMeans->appendChild($dom->createElement('TypeCode', '58'));
+        $settlement->appendChild($paymentMeans);
+        
+        $this->buildZugferd10TaxTotals($dom, $settlement, $invoice, $currencyCode);
+        
+        $paymentTerms = $dom->createElement('SpecifiedTradePaymentTerms');
+        $dueDate = $dom->createElement('DueDateTime');
+        $dueDateStr = $dom->createElement('DateTimeString');
+        $dueDateStr->setAttribute('format', '102');
+        $dueDateStr->appendChild($dom->createTextNode($invoice->invoice_due_at?->format('Ymd') ?? ''));
+        $dueDate->appendChild($dueDateStr);
+        $paymentTerms->appendChild($dueDate);
+        $settlement->appendChild($paymentTerms);
+        
+        $this->buildZugferd10MonetarySummation($dom, $settlement, $invoice, $currencyCode);
+        
+        $parent->appendChild($settlement);
+    }
+
+    /**
+     * Build ZUGFeRD 1.0 seller party.
+     */
+    protected function buildZugferd10Seller(DOMDocument $dom, DOMElement $parent, Invoice $invoice): void
+    {
+        $seller = $dom->createElement('SellerTradeParty');
+        $seller->appendChild($dom->createElement('Name', htmlspecialchars($invoice->company?->name ?? config('invoices.peppol.supplier.company_name', ''))));
+        
+        $address = $invoice->company?->addresses?->first();
+        $postal = $dom->createElement('PostalTradeAddress');
+        $postal->appendChild($dom->createElement('PostcodeCode', htmlspecialchars($address?->zip ?? '')));
+        $postal->appendChild($dom->createElement('LineOne', htmlspecialchars($address?->street ?? '')));
+        $postal->appendChild($dom->createElement('CityName', htmlspecialchars($address?->city ?? '')));
+        $postal->appendChild($dom->createElement('CountryID', htmlspecialchars($address?->country ?? 'DE')));
+        $seller->appendChild($postal);
+        
+        $vatNumber = $invoice->company?->vat_number ?? config('invoices.peppol.supplier.vat_number');
+        if ($vatNumber) {
+            $taxReg = $dom->createElement('SpecifiedTaxRegistration');
+            $taxId = $dom->createElement('ID');
+            $taxId->setAttribute('schemeID', 'VA');
+            $taxId->appendChild($dom->createTextNode($vatNumber));
+            $taxReg->appendChild($taxId);
+            $seller->appendChild($taxReg);
+        }
+        
+        $parent->appendChild($seller);
+    }
+
+    /**
+     * Build ZUGFeRD 1.0 buyer party.
+     */
+    protected function buildZugferd10Buyer(DOMDocument $dom, DOMElement $parent, Invoice $invoice): void
+    {
+        $customer = $invoice->customer;
+        $buyer = $dom->createElement('BuyerTradeParty');
+        $buyer->appendChild($dom->createElement('Name', htmlspecialchars($customer?->company_name ?? '')));
+        
+        $address = $customer?->addresses?->first();
+        $postal = $dom->createElement('PostalTradeAddress');
+        $postal->appendChild($dom->createElement('PostcodeCode', htmlspecialchars($address?->zip ?? '')));
+        $postal->appendChild($dom->createElement('LineOne', htmlspecialchars($address?->street ?? '')));
+        $postal->appendChild($dom->createElement('CityName', htmlspecialchars($address?->city ?? '')));
+        $postal->appendChild($dom->createElement('CountryID', htmlspecialchars($address?->country ?? '')));
+        $buyer->appendChild($postal);
+        
+        $parent->appendChild($buyer);
+    }
+
+    /**
+     * Build ZUGFeRD 1.0 tax totals.
+     */
+    protected function buildZugferd10TaxTotals(DOMDocument $dom, DOMElement $parent, Invoice $invoice, string $currencyCode): void
+    {
+        $taxGroups = [];
+        
+        foreach ($invoice->invoiceItems as $item) {
+            $rate = $item->tax_rate ?? 0;
+            $rateKey = (string) $rate;
+            
+            if (!isset($taxGroups[$rateKey])) {
+                $taxGroups[$rateKey] = ['basis' => 0, 'amount' => 0];
+            }
+            
+            $taxGroups[$rateKey]['basis'] += (float) ($item->subtotal ?? 0);
+            $taxGroups[$rateKey]['amount'] += (float) ($item->tax_total ?? 0);
+        }
+        
+        foreach ($taxGroups as $rateKey => $group) {
+            $rate = (float) $rateKey;
+            
+            $tax = $dom->createElement('ApplicableTradeTax');
+            $calcAmount = $dom->createElement('CalculatedAmount', number_format($group['amount'], 2, '.', ''));
+            $calcAmount->setAttribute('currencyID', $currencyCode);
+            $tax->appendChild($calcAmount);
+            $tax->appendChild($dom->createElement('TypeCode', 'VAT'));
+            $basisAmount = $dom->createElement('BasisAmount', number_format($group['basis'], 2, '.', ''));
+            $basisAmount->setAttribute('currencyID', $currencyCode);
+            $tax->appendChild($basisAmount);
+            $tax->appendChild($dom->createElement('CategoryCode', $rate > 0 ? 'S' : 'Z'));
+            $tax->appendChild($dom->createElement('ApplicablePercent', number_format($rate, 2, '.', '')));
+            
+            $parent->appendChild($tax);
+        }
+    }
+
+    /**
+     * Build ZUGFeRD 1.0 monetary summation.
+     */
+    protected function buildZugferd10MonetarySummation(DOMDocument $dom, DOMElement $parent, Invoice $invoice, string $currencyCode): void
+    {
+        $summation = $dom->createElement('SpecifiedTradeSettlementMonetarySummation');
+        
+        $lineTotal = $dom->createElement('LineTotalAmount', number_format($invoice->invoice_item_subtotal ?? 0, 2, '.', ''));
+        $lineTotal->setAttribute('currencyID', $currencyCode);
+        $summation->appendChild($lineTotal);
+        
+        $taxBasis = $dom->createElement('TaxBasisTotalAmount', number_format($invoice->invoice_item_subtotal ?? 0, 2, '.', ''));
+        $taxBasis->setAttribute('currencyID', $currencyCode);
+        $summation->appendChild($taxBasis);
+        
+        $taxTotal = $dom->createElement('TaxTotalAmount', number_format($invoice->invoice_tax_total ?? 0, 2, '.', ''));
+        $taxTotal->setAttribute('currencyID', $currencyCode);
+        $summation->appendChild($taxTotal);
+        
+        $grandTotal = $dom->createElement('GrandTotalAmount', number_format($invoice->invoice_total ?? 0, 2, '.', ''));
+        $grandTotal->setAttribute('currencyID', $currencyCode);
+        $summation->appendChild($grandTotal);
+        
+        $duePayable = $dom->createElement('DuePayableAmount', number_format($invoice->invoice_total ?? 0, 2, '.', ''));
+$duePayable->setAttribute('currencyID', $currencyCode);
+        $summation->appendChild($duePayable);
+        
+        $parent->appendChild($summation);
+    }
+
+    /**
+     * Generate ZUGFeRD 2.0 XML.
+     */
+    protected function generateXml20(DOMDocument $dom, Invoice $invoice, array $data): string
+    {
+        $root = $dom->createElementNS(
+            'urn:un:unece:uncefact:data:standard:CrossIndustryInvoice:100',
+            'rsm:CrossIndustryInvoice'
+        );
+        $root->setAttribute('xmlns:rsm', 'urn:un:unece:uncefact:data:standard:CrossIndustryInvoice:100');
+        $root->setAttribute('xmlns:ram', 'urn:un:unece:uncefact:data:standard:ReusableAggregateBusinessInformationEntity:100');
+        $root->setAttribute('xmlns:udt', 'urn:un:unece:uncefact:data:standard:UnqualifiedDataType:100');
+        $dom->appendChild($root);
+        
+        // Context
+        $context = $dom->createElement('rsm:ExchangedDocumentContext');
+        $guideline = $dom->createElement('ram:GuidelineSpecifiedDocumentContextParameter');
+        $guideline->appendChild($dom->createElement('ram:ID', 'urn:cen.eu:en16931:2017#compliant#urn:zugferd.de:2p0:basic'));
+        $context->appendChild($guideline);
+        $root->appendChild($context);
+        
+        // Document
+        $doc = $dom->createElement('rsm:ExchangedDocument');
+        $docId = $dom->createElement('ram:ID', htmlspecialchars($invoice->invoice_number ?? ''));
+        $docType = $dom->createElement('ram:TypeCode', '380');
+        $docDate = $dom->createElement('ram:IssueDateTime');
+        $docDateStr = $dom->createElement('udt:DateTimeString');
+        $docDateStr->setAttribute('format', '102');
+        $docDateStr->appendChild($dom->createTextNode($invoice->invoiced_at?->format('Ymd') ?? ''));
+        $docDate->appendChild($docDateStr);
+        $doc->appendChild($docId);
+        $doc->appendChild($docType);
+        $doc->appendChild($docDate);
+        $root->appendChild($doc);
+        
+        // SupplyChainTradeTransaction
+        $transaction = $dom->createElement('rsm:SupplyChainTradeTransaction');
+        $this->buildZugferd20Transaction($dom, $transaction, $invoice);
+        $root->appendChild($transaction);
+        
+        return $dom->saveXML();
+    }
+
+    /**
+     * Build ZUGFeRD 2.0 supply chain trade transaction.
+     */
+    protected function buildZugferd20Transaction(DOMDocument $dom, DOMElement $parent, Invoice $invoice): void
+    {
+        $currencyCode = $this->getCurrencyCode($invoice);
+        
+        // Agreement
+        $agreement = $dom->createElement('ram:ApplicableHeaderTradeAgreement');
+        $this->buildZugferd20Seller($dom, $agreement, $invoice);
+        $this->buildZugferd20Buyer($dom, $agreement, $invoice);
+        $parent->appendChild($agreement);
+        
+        // Delivery
+        $delivery = $dom->createElement('ram:ApplicableHeaderTradeDelivery');
+        $event = $dom->createElement('ram:ActualDeliverySupplyChainEvent');
+        $eventDate = $dom->createElement('ram:OccurrenceDateTime');
+        $eventDateStr = $dom->createElement('udt:DateTimeString');
+        $eventDateStr->setAttribute('format', '102');
+        $eventDateStr->appendChild($dom->createTextNode($invoice->invoiced_at?->format('Ymd') ?? ''));
+        $eventDate->appendChild($eventDateStr);
+        $event->appendChild($eventDate);
+        $delivery->appendChild($event);
+        $parent->appendChild($delivery);
+        
+        // Settlement
+        $settlement = $dom->createElement('ram:ApplicableHeaderTradeSettlement');
+        $settlement->appendChild($dom->createElement('ram:InvoiceCurrencyCode', $currencyCode));
+        
+        $paymentMeans = $dom->createElement('ram:SpecifiedTradeSettlementPaymentMeans');
+        $paymentMeans->appendChild($dom->createElement('ram:TypeCode', '58'));
+        $settlement->appendChild($paymentMeans);
+        
+        $this->buildZugferd20TaxTotals($dom, $settlement, $invoice, $currencyCode);
+        
+        $paymentTerms = $dom->createElement('ram:SpecifiedTradePaymentTerms');
+        $dueDate = $dom->createElement('ram:DueDateTime');
+        $dueDateStr = $dom->createElement('udt:DateTimeString');
+        $dueDateStr->setAttribute('format', '102');
+        $dueDateStr->appendChild($dom->createTextNode($invoice->invoice_due_at?->format('Ymd') ?? ''));
+        $dueDate->appendChild($dueDateStr);
+        $paymentTerms->appendChild($dueDate);
+        $settlement->appendChild($paymentTerms);
+        
+        $this->buildZugferd20MonetarySummation($dom, $settlement, $invoice, $currencyCode);
+        
+        $parent->appendChild($settlement);
+    }
+
+    /**
+     * Build ZUGFeRD 2.0 seller party.
+     */
+    protected function buildZugferd20Seller(DOMDocument $dom, DOMElement $parent, Invoice $invoice): void
+    {
+        $seller = $dom->createElement('ram:SellerTradeParty');
+        $seller->appendChild($dom->createElement('ram:Name', htmlspecialchars($invoice->company?->name ?? config('invoices.peppol.supplier.company_name', ''))));
+        
+        $address = $invoice->company?->addresses?->first();
+        $postal = $dom->createElement('ram:PostalTradeAddress');
+        $postal->appendChild($dom->createElement('ram:PostcodeCode', htmlspecialchars($address?->zip ?? '')));
+        $postal->appendChild($dom->createElement('ram:LineOne', htmlspecialchars($address?->street ?? '')));
+        $postal->appendChild($dom->createElement('ram:CityName', htmlspecialchars($address?->city ?? '')));
+        $postal->appendChild($dom->createElement('ram:CountryID', htmlspecialchars($address?->country ?? 'DE')));
+        $seller->appendChild($postal);
+        
+        $vatNumber = $invoice->company?->vat_number ?? config('invoices.peppol.supplier.vat_number');
+        if ($vatNumber) {
+            $taxReg = $dom->createElement('ram:SpecifiedTaxRegistration');
+            $taxId = $dom->createElement('ram:ID');
+            $taxId->setAttribute('schemeID', 'VA');
+            $taxId->appendChild($dom->createTextNode($vatNumber));
+            $taxReg->appendChild($taxId);
+            $seller->appendChild($taxReg);
+        }
+        
+        $parent->appendChild($seller);
+    }
+
+    /**
+     * Build ZUGFeRD 2.0 buyer party.
+     */
+    protected function buildZugferd20Buyer(DOMDocument $dom, DOMElement $parent, Invoice $invoice): void
+    {
+        $customer = $invoice->customer;
+        $buyer = $dom->createElement('ram:BuyerTradeParty');
+        $buyer->appendChild($dom->createElement('ram:Name', htmlspecialchars($customer?->company_name ?? '')));
+        
+        $address = $customer?->addresses?->first();
+        $postal = $dom->createElement('ram:PostalTradeAddress');
+        $postal->appendChild($dom->createElement('ram:PostcodeCode', htmlspecialchars($address?->zip ?? '')));
+        $postal->appendChild($dom->createElement('ram:LineOne', htmlspecialchars($address?->street ?? '')));
+        $postal->appendChild($dom->createElement('ram:CityName', htmlspecialchars($address?->city ?? '')));
+        $postal->appendChild($dom->createElement('ram:CountryID', htmlspecialchars($address?->country ?? '')));
+        $buyer->appendChild($postal);
+        
+        $parent->appendChild($buyer);
+    }
+
+    /**
+     * Build ZUGFeRD 2.0 tax totals.
+     */
+    protected function buildZugferd20TaxTotals(DOMDocument $dom, DOMElement $parent, Invoice $invoice, string $currencyCode): void
+    {
+        $taxGroups = [];
+        
+        foreach ($invoice->invoiceItems as $item) {
+            $rate = $item->tax_rate ?? 0;
+            $rateKey = (string) $rate;
+            
+            if (!isset($taxGroups[$rateKey])) {
+                $taxGroups[$rateKey] = ['basis' => 0, 'amount' => 0];
+            }
+            
+            $taxGroups[$rateKey]['basis'] += (float) ($item->subtotal ?? 0);
+            $taxGroups[$rateKey]['amount'] += (float) ($item->tax_total ?? 0);
+        }
+        
+        foreach ($taxGroups as $rateKey => $group) {
+            $rate = (float) $rateKey;
+            
+            $tax = $dom->createElement('ram:ApplicableTradeTax');
+            $tax->appendChild($dom->createElement('ram:CalculatedAmount', number_format($group['amount'], 2, '.', '')));
+            $tax->appendChild($dom->createElement('ram:TypeCode', 'VAT'));
+            $tax->appendChild($dom->createElement('ram:BasisAmount', number_format($group['basis'], 2, '.', '')));
+            $tax->appendChild($dom->createElement('ram:CategoryCode', $rate > 0 ? 'S' : 'Z'));
+            $tax->appendChild($dom->createElement('ram:RateApplicablePercent', number_format($rate, 2, '.', '')));
+            
+            $parent->appendChild($tax);
+        }
+    }
+
+    /**
+     * Build ZUGFeRD 2.0 monetary summation.
+     */
+    protected function buildZugferd20MonetarySummation(DOMDocument $dom, DOMElement $parent, Invoice $invoice, string $currencyCode): void
+    {
+        $summation = $dom->createElement('ram:SpecifiedTradeSettlementHeaderMonetarySummation');
+        
+        $summation->appendChild($dom->createElement('ram:LineTotalAmount', number_format($invoice->invoice_item_subtotal ?? 0, 2, '.', '')));
+        $summation->appendChild($dom->createElement('ram:TaxBasisTotalAmount', number_format($invoice->invoice_item_subtotal ?? 0, 2, '.', '')));
+        
+        $taxTotal = $dom->createElement('ram:TaxTotalAmount', number_format($invoice->invoice_tax_total ?? 0, 2, '.', ''));
+        $taxTotal->setAttribute('currencyID', $currencyCode);
+        $summation->appendChild($taxTotal);
+        
+        $summation->appendChild($dom->createElement('ram:GrandTotalAmount', number_format($invoice->invoice_total ?? 0, 2, '.', '')));
+        $summation->appendChild($dom->createElement('ram:DuePayableAmount', number_format($invoice->invoice_total ?? 0, 2, '.', '')));
+        
+        $parent->appendChild($summation);
     }
 
     /**

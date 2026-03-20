@@ -116,7 +116,10 @@ class RelationForm
                                                     ->label(trans('ip.coc_number')),
 
                                                 TextInput::make('vat_number')
-                                                    ->label(trans('ip.vat_id')),
+                                                    ->label(trans('ip.vat_id'))
+                                                    ->hint(trans('ip.vat_id_hint'))
+                                                    ->nullable()
+                                                    ->rule(new \Modules\Core\Rules\GermanVatId()),
 
                                                 DatePicker::make('registered_at')
                                                     ->label(trans('ip.date'))

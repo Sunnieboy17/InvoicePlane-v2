@@ -89,6 +89,20 @@ class InvoiceForm
                                             ->label(trans('ip.invoice_due_at'))
                                             ->required(),
 
+                                        // Leistungsdatum / Service Date (DE §14 UStG)
+                                        DatePicker::make('service_date')
+                                            ->label(trans('ip.service_date'))
+                                            ->nullable(),
+
+                                        // Leistungszeitraum / Service Period
+                                        DatePicker::make('service_period_start')
+                                            ->label(trans('ip.service_period_start'))
+                                            ->nullable(),
+
+                                        DatePicker::make('service_period_end')
+                                            ->label(trans('ip.service_period_end'))
+                                            ->nullable(),
+
                                         Select::make('numbering_id')
                                             ->label(trans('ip.numbering'))
                                             ->relationship('numbering', 'name')
@@ -99,6 +113,27 @@ class InvoiceForm
 
                                         TextInput::make('invoice_password')
                                             ->label(trans('ip.invoice_password')),
+                                    ]),
+
+                                // Business Reference Fields (RB-IMP-09)
+                                Section::make(trans('ip.business_references'))
+                                    ->columns(3)
+                                    ->collapsed()
+                                    ->schema([
+                                        TextInput::make('buyer_reference')
+                                            ->label(trans('ip.buyer_reference'))
+                                            ->nullable()
+                                            ->maxLength(255),
+
+                                        TextInput::make('order_reference')
+                                            ->label(trans('ip.order_reference'))
+                                            ->nullable()
+                                            ->maxLength(255),
+
+                                        TextInput::make('project_reference')
+                                            ->label(trans('ip.project_reference'))
+                                            ->nullable()
+                                            ->maxLength(255),
                                     ]),
                             ]),
                     ]),

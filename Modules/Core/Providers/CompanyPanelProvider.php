@@ -182,7 +182,18 @@ class CompanyPanelProvider extends PanelProvider
                 //RecentPaymentsWidget::class,
             ])
             ->navigation(function (NavigationBuilder $builder): NavigationBuilder {
-                $tenant = request('tenant');
+                // Filament may pass tenant as numeric ID (on /profile) or as search_code (on tenant routes).
+                $tenantParam = request('tenant');
+                if ($tenantParam && is_numeric($tenantParam)) {
+                    $tenant = \Modules\Core\Models\Company::find((int) $tenantParam)?->search_code;
+                } else {
+                    $tenant = $tenantParam ?? \Filament\Facades\Filament::getTenant()?->search_code;
+                }
+
+                // On non-tenant pages where tenant cannot be resolved, return minimal navigation.
+                if (! $tenant) {
+                    return $builder->items([]);
+                }
 
                 return $builder
                     ->items([
@@ -248,7 +259,8 @@ class CompanyPanelProvider extends PanelProvider
                 Action::make('settings')
                     ->label(trans('ip.settings'))
                     ->url('/admin/settings')
-                    ->icon('heroicon-o-cog-6-tooth'),
+                    ->icon('heroicon-o-cog-6-tooth')
+                    ->visible(fn () => auth()->user()?->hasAnyRole(\Modules\Core\Enums\UserRole::elevated())),
                 'logout' => fn (Action $action) => $action
                     ->label(trans('ip.logout'))
                     ->icon('heroicon-o-arrow-right-start-on-rectangle'),

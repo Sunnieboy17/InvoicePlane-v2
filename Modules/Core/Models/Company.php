@@ -39,6 +39,12 @@ use Modules\Quotes\Models\QuoteItem;
  * @property string|null                   $vat_number
  * @property string|null                   $id_number
  * @property string|null                   $coc_number
+ * @property string|null                   $iban
+ * @property string|null                   $bic
+ * @property string|null                   $bank_name
+ * @property string|null                   $account_holder
+ * @property int                           $default_payment_terms
+ * @property string|null                   $default_payment_terms_text
  * @property string|null                   $logo
  * @property string                        $quote_template
  * @property string                        $invoice_template

@@ -24,6 +24,7 @@ use Modules\Core\Models\User;
 use Modules\Core\Traits\BelongsToCompany;
 use Modules\Expenses\Models\Expense;
 use Modules\Invoices\Database\Factories\InvoiceFactory;
+use Modules\Invoices\Enums\CreditNoteType;
 use Modules\Invoices\Enums\InvoiceStatus;
 use Modules\Payments\Models\Payment;
 use Modules\Quotes\Models\Quote;
@@ -38,6 +39,9 @@ use Modules\Quotes\Models\Quote;
  * @property Carbon                   $invoiced_at
  * @property int                      $invoice_status_id
  * @property Carbon                   $due_at
+ * @property Carbon|null              $service_date
+ * @property Carbon|null              $service_period_start
+ * @property Carbon|null              $service_period_end
  * @property string                   $url_key
  * @property string|null              $currency_code
  * @property float                    $exchange_rate
@@ -54,6 +58,10 @@ use Modules\Quotes\Models\Quote;
  * @property string|null              $summary
  * @property string|null              $terms
  * @property string|null              $footer
+ * @property string|null              $buyer_reference
+ * @property string|null              $order_reference
+ * @property string|null              $project_reference
+ * @property string|null              $credit_note_type
  * @property Company                  $company
  * @property Customer                 $customer
  * @property Numbering                $group
@@ -76,11 +84,15 @@ class Invoice extends Model
         'invoice_item_subtotal'    => 'decimal:4',
         'invoice_item_tax_total'   => 'decimal:4',
         'invoice_due_at'           => 'date',
+        'service_date'             => 'date',
+        'service_period_start'     => 'date',
+        'service_period_end'       => 'date',
         'invoice_status'           => InvoiceStatus::class,
         'invoice_tax_total'        => 'decimal:4',
         'invoice_total'            => 'decimal:4',
         'invoiced_at'              => 'date',
         'is_read_only'             => 'boolean',
+        'credit_note_type'         => CreditNoteType::class,
     ];
 
     protected $guarded = [];
@@ -127,6 +139,16 @@ class Invoice extends Model
     public function creditInvoiceParent(): BelongsTo
     {
         return $this->belongsTo(self::class, 'creditinvoice_parent_id');
+    }
+
+    /**
+     * Get credit notes derived from this invoice.
+     * RB-IMP-15
+     */
+    public function creditNotes(): HasMany
+    {
+        return $this->hasMany(self::class, 'creditinvoice_parent_id')
+            ->where('invoice_sign', '-1');
     }
 
     public function customer(): BelongsTo
@@ -186,6 +208,34 @@ class Invoice extends Model
     | Accessors
     |--------------------------------------------------------------------------
     */
+
+    /**
+     * Check if this invoice is a credit note.
+     * RB-IMP-15
+     */
+    public function getIsCreditNoteAttribute(): bool
+    {
+        return $this->invoice_sign === '-1' || $this->credit_note_type !== null;
+    }
+
+    /**
+     * Check if this invoice has credit notes.
+     * RB-IMP-15
+     */
+    public function getHasCreditNotesAttribute(): bool
+    {
+        return $this->creditNotes()->exists();
+    }
+
+    /**
+     * Get the type label for credit notes.
+     * RB-IMP-15
+     */
+    public function getCreditNoteTypeLabelAttribute(): ?string
+    {
+        return $this->credit_note_type?->label();
+    }
+
     /**
      * Get the color intensity for invoice_due_at.
      *
@@ -221,6 +271,34 @@ class Invoice extends Model
     | Scopes
     |--------------------------------------------------------------------------
     */
+
+    /**
+     * Scope for credit notes only.
+     * RB-IMP-15
+     */
+    public function scopeCreditNotes($query)
+    {
+        return $query->where('invoice_sign', '-1');
+    }
+
+    /**
+     * Scope for regular invoices (not credit notes).
+     * RB-IMP-15
+     */
+    public function scopeRegularInvoices($query)
+    {
+        return $query->where('invoice_sign', '!=', '-1');
+    }
+
+    /**
+     * Scope for invoices with credit notes.
+     * RB-IMP-15
+     */
+    public function scopeWithCreditNotes($query)
+    {
+        return $query->has('creditNotes');
+    }
+
     public function scopeRecent($query, $limit = 25)
     {
         $invoiceLimit = config('ip.default_list_limit', 15) ?? $limit;

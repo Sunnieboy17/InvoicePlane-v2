@@ -2,214 +2,208 @@
 
 namespace Modules\Invoices\Peppol\Services;
 
+use Modules\Invoices\DTO\EInvoiceAddress;
+use Modules\Invoices\DTO\EInvoiceDocument;
+use Modules\Invoices\DTO\EInvoiceLine;
+use Modules\Invoices\DTO\EInvoiceMonetaryTotals;
+use Modules\Invoices\DTO\EInvoiceParty;
+use Modules\Invoices\DTO\EInvoicePaymentTerms;
+use Modules\Invoices\DTO\EInvoiceTaxCategory;
+use Modules\Invoices\DTO\EInvoiceTaxSubtotal;
+use Modules\Invoices\DTO\EInvoiceTaxTotal;
 use Modules\Invoices\Models\Invoice;
 
 /**
- * Service to transform InvoicePlane invoices to Peppol data structures.
+ * PeppolTransformerService - RB-IMP-10
  *
- * This service extracts data from the Invoice model and creates
- * standardized DTOs that can be used by format handlers
+ * Normalizes an InvoicePlane Invoice model into a typed EInvoiceDocument DTO.
+ * This is the central mapping layer between the domain model and all
+ * structured export formats (XRechnung / CII, ZUGFeRD, Peppol BIS).
+ *
+ * Format handlers should call transform() and use the returned EInvoiceDocument
+ * (or its toArray() representation for backwards compatibility).
  */
 class PeppolTransformerService
 {
     /**
-     * Transform an invoice to Peppol-compatible data structure.
+     * Transform an invoice into a typed EInvoiceDocument DTO.
      *
      * @param Invoice $invoice
-     * @param string  $format  Target format (for format-specific transformations)
+     * @param string  $format  Target format identifier (for metadata)
      *
-     * @return array Peppol data structure
+     * @return EInvoiceDocument
      */
-    public function transform(Invoice $invoice, string $format): array
+    public function transform(Invoice $invoice, string $format): EInvoiceDocument
     {
-        return [
-            'invoice_type_code' => $this->getInvoiceTypeCode($invoice),
-            'invoice_number'    => $invoice->number,
-            'issue_date'        => $invoice->invoice_date->format('Y-m-d'),
-            'due_date'          => $invoice->due_date?->format('Y-m-d'),
-            'currency_code'     => config('invoices.peppol.currency_code', 'EUR'),
-
-            'supplier'        => $this->transformSupplier($invoice),
-            'customer'        => $this->transformCustomer($invoice),
-            'invoice_lines'   => $this->transformInvoiceLines($invoice),
-            'tax_totals'      => $this->transformTaxTotals($invoice),
-            'monetary_totals' => $this->transformMonetaryTotals($invoice),
-            'payment_terms'   => $this->transformPaymentTerms($invoice),
-
-            // Metadata
-            'format'     => $format,
-            'invoice_id' => $invoice->id,
-        ];
+        return new EInvoiceDocument(
+            invoiceTypeCode: $this->getInvoiceTypeCode($invoice),
+            invoiceNumber:   $invoice->invoice_number ?? $invoice->number ?? '',
+            issueDate:       $invoice->invoiced_at?->format('Y-m-d') ?? now()->format('Y-m-d'),
+            dueDate:         $invoice->invoice_due_at?->format('Y-m-d'),
+            currencyCode:    $invoice->currency_code ?? config('invoices.peppol.currency_code', 'EUR'),
+            supplier:        $this->transformSupplier($invoice),
+            buyer:           $this->transformBuyer($invoice),
+            lines:           $this->transformInvoiceLines($invoice),
+            taxTotals:       $this->transformTaxTotals($invoice),
+            monetaryTotals:  $this->transformMonetaryTotals($invoice),
+            paymentTerms:    $this->transformPaymentTerms($invoice),
+            format:          $format,
+            invoiceId:       $invoice->id,
+        );
     }
 
     /**
-     * Determine the Peppol invoice type code for the given invoice.
-     *
-     * Maps invoice kinds to the Peppol code: '380' for a standard commercial invoice and '381' for a credit note.
-     *
-     * @param Invoice $invoice the invoice to inspect when determining the type code
-     *
-     * @return string The Peppol invoice type code (e.g., '380' or '381').
+     * Determine the Peppol invoice type code.
+     * '380' = standard commercial invoice, '381' = credit note.
      */
     protected function getInvoiceTypeCode(Invoice $invoice): string
     {
-        // TODO: Detect credit note vs invoice
-        return '380'; // Standard commercial invoice
+        if ($invoice->invoice_sign === '-1' || $invoice->credit_note_type !== null) {
+            return '381';
+        }
+
+        return '380';
     }
 
     /**
-     * Build an array representing the supplier (company) information for Peppol output.
-     *
-     * @param Invoice $invoice the invoice used to source supplier data; company name will fall back to $invoice->company->name when not configured
-     *
-     * @return array{
-     *     name: string,
-     *     vat_number: null|string,
-     *     address: array{
-     *         street: null|string,
-     *         city: null|string,
-     *         postal_code: null|string,
-     *         country_code: null|string
-     *     }
-     * } Supplier structure with address fields mapped for Peppol.
-     * protected function transformSupplier(Invoice $invoice): array
-     * {
-     * return [
-     * 'name' => config('invoices.peppol.supplier.name', $invoice->company->name ?? ''),
-     * 'vat_number' => config('invoices.peppol.supplier.vat'),
-     * 'address' => [
-     * 'street' => config('invoices.peppol.supplier.street'),
-     * 'city' => config('invoices.peppol.supplier.city'),
-     * 'postal_code' => config('invoices.peppol.supplier.postal'),
-     * 'country_code' => config('invoices.peppol.supplier.country'),
-     * ],
-     * ];
-     * }
-     *
-     * @param Invoice $invoice the invoice containing the customer and address data to transform
-     *
-     * @return array{
-     *   name: mixed,
-     *   vat_number: mixed,
-     *   endpoint_id: mixed,
-     *   endpoint_scheme: mixed,
-     *   address: array{street: mixed, city: mixed, postal_code: mixed, country_code: mixed}|null
-     * } An associative array with customer fields; `address` is an address array when available or `null`
+     * Build the supplier (company/sender) party from the invoice's company.
      */
-    protected function transformCustomer(Invoice $invoice): array
+    protected function transformSupplier(Invoice $invoice): EInvoiceParty
+    {
+        $company = $invoice->company;
+        $address = null;
+
+        if ($company) {
+            $address = new EInvoiceAddress(
+                street:      $company->address ?? null,
+                city:        $company->city ?? null,
+                postalCode:  $company->zip ?? null,
+                countryCode: $company->country ?? null,
+            );
+        }
+
+        return new EInvoiceParty(
+            name:           $company?->name ?? config('invoices.peppol.supplier.name', ''),
+            vatNumber:      $company?->vat_number ?? config('invoices.peppol.supplier.vat'),
+            endpointId:     null,
+            endpointScheme: null,
+            address:        $address,
+        );
+    }
+
+    /**
+     * Build the buyer (customer/recipient) party from the invoice's customer.
+     */
+    protected function transformBuyer(Invoice $invoice): EInvoiceParty
     {
         $customer = $invoice->customer;
-        $address  = $customer->primaryAddress ?? $customer->billingAddress;
+        $address  = null;
 
-        return [
-            'name'            => $customer->company_name,
-            'vat_number'      => $customer->vat_number,
-            'endpoint_id'     => $customer->peppol_id,
-            'endpoint_scheme' => $customer->peppol_scheme,
-            'address'         => $address ? [
-                'street'       => $address->address_1,
-                'city'         => $address->city,
-                'postal_code'  => $address->zip,
-                'country_code' => $address->country,
-            ] : null,
-        ];
+        if ($customer) {
+            $raw = $customer->primaryAddress ?? $customer->billingAddress ?? null;
+            if ($raw) {
+                $address = new EInvoiceAddress(
+                    street:      $raw->address_1 ?? null,
+                    city:        $raw->city ?? null,
+                    postalCode:  $raw->zip ?? null,
+                    countryCode: $raw->country ?? null,
+                );
+            }
+        }
+
+        return new EInvoiceParty(
+            name:           $customer?->company_name ?? '',
+            vatNumber:      $customer?->vat_number,
+            endpointId:     $customer?->peppol_id,
+            endpointScheme: $customer?->peppol_scheme,
+            address:        $address,
+        );
     }
 
     /**
-     * Build an array of Peppol-compatible invoice line representations from the given invoice.
+     * Transform invoice line items into typed EInvoiceLine DTOs.
      *
-     * @param Invoice $invoice the invoice whose line items will be transformed
-     *
-     * @return array an indexed array of line item arrays; each element contains keys: `id`, `quantity`, `unit_code`, `line_extension_amount`, `price_amount`, `item` (with `name` and `description`), and `tax` (with `category_code`, `percent`, and `amount`)
+     * @return EInvoiceLine[]
      */
     protected function transformInvoiceLines(Invoice $invoice): array
     {
-        return $invoice->invoiceItems->map(function ($item, $index) {
-            return [
-                'id'                    => $index + 1,
-                'quantity'              => $item->quantity,
-                'unit_code'             => config('invoices.peppol.unit_code', 'C62'), // C62 = unit
-                'line_extension_amount' => $item->subtotal,
-                'price_amount'          => $item->price,
-                'item'                  => [
-                    'name'        => $item->name,
-                    'description' => $item->description,
-                ],
-                'tax' => [
-                    'category_code' => 'S', // Standard rate
-                    'percent'       => $item->tax_rate ?? 0,
-                    'amount'        => $item->tax_total ?? 0,
-                ],
-            ];
-        })->toArray();
+        return $invoice->invoiceItems->map(function ($item, int $index): EInvoiceLine {
+            return new EInvoiceLine(
+                id:                  $index + 1,
+                quantity:            (float) ($item->quantity ?? 1),
+                unitCode:            config('invoices.peppol.unit_code', 'C62'),
+                lineExtensionAmount: (float) ($item->subtotal ?? 0),
+                priceAmount:         (float) ($item->price ?? 0),
+                itemName:            $item->item_name ?? $item->name ?? '',
+                itemDescription:     $item->description ?? null,
+                taxCategoryCode:     'S',
+                taxPercent:          (float) ($item->tax_rate ?? 0),
+                taxAmount:           (float) ($item->tax_1 ?? $item->tax ?? 0),
+            );
+        })->values()->all();
     }
 
     /**
-     * Builds a structured array of tax totals and subtotals for the given invoice.
+     * Build tax total DTOs, grouped by tax category.
      *
-     * @param Invoice $invoice the invoice to extract tax totals from
-     *
-     * @return array An array of tax total entries. Each entry contains:
-     *               - `tax_amount`: total tax amount for the invoice.
-     *               - `tax_subtotals`: array of subtotals, each with:
-     *               - `taxable_amount`: amount subject to tax,
-     *               - `tax_amount`: tax amount for the subtotal,
-     *               - `tax_category`: object with `code` and `percent`.
+     * @return EInvoiceTaxTotal[]
      */
     protected function transformTaxTotals(Invoice $invoice): array
     {
+        $taxTotal    = (float) ($invoice->invoice_tax_total ?? $invoice->tax ?? 0);
+        $subtotal    = (float) ($invoice->invoice_item_subtotal ?? $invoice->subtotal ?? 0);
+
+        // Calculate effective tax rate from items when possible
+        $taxPercent = 0.0;
+        if ($subtotal > 0 && $taxTotal > 0) {
+            $taxPercent = round(($taxTotal / $subtotal) * 100, 2);
+        }
+
+        $subtotalDto = new EInvoiceTaxSubtotal(
+            taxableAmount: $subtotal,
+            taxAmount:     $taxTotal,
+            taxCategory:   new EInvoiceTaxCategory(code: 'S', percent: $taxPercent),
+        );
+
         return [
-            [
-                'tax_amount'    => $invoice->tax_total ?? 0,
-                'tax_subtotals' => [
-                    [
-                        'taxable_amount' => $invoice->subtotal ?? 0,
-                        'tax_amount'     => $invoice->tax_total ?? 0,
-                        'tax_category'   => [
-                            'code'    => 'S',
-                            'percent' => 21, // TODO: Calculate from invoice items
-                        ],
-                    ],
-                ],
-            ],
+            new EInvoiceTaxTotal(
+                taxAmount:    $taxTotal,
+                taxSubtotals: [$subtotalDto],
+            ),
         ];
     }
 
     /**
-     * Builds the invoice monetary totals.
-     *
-     * @return array{
-     *     line_extension_amount: float|int,    // total of invoice lines before tax (subtotal or 0)
-     *     tax_exclusive_amount: float|int,    // amount excluding tax (subtotal or 0)
-     *     tax_inclusive_amount: float|int,    // total including tax (total or 0)
-     *     payable_amount: float|int           // amount due (balance if set, otherwise total, or 0)
-     * }
+     * Build the monetary totals DTO.
      */
-    protected function transformMonetaryTotals(Invoice $invoice): array
+    protected function transformMonetaryTotals(Invoice $invoice): EInvoiceMonetaryTotals
     {
-        return [
-            'line_extension_amount' => $invoice->subtotal ?? 0,
-            'tax_exclusive_amount'  => $invoice->subtotal ?? 0,
-            'tax_inclusive_amount'  => $invoice->total ?? 0,
-            'payable_amount'        => $invoice->balance ?? $invoice->total ?? 0,
-        ];
+        $subtotal = (float) ($invoice->invoice_item_subtotal ?? $invoice->subtotal ?? 0);
+        $total    = (float) ($invoice->invoice_total ?? $invoice->total ?? 0);
+        $balance  = (float) ($invoice->balance ?? $total);
+
+        return new EInvoiceMonetaryTotals(
+            lineExtensionAmount: $subtotal,
+            taxExclusiveAmount:  $subtotal,
+            taxInclusiveAmount:  $total,
+            payableAmount:       $balance,
+        );
     }
 
     /**
-     * Produce payment terms when the invoice has a due date.
-     *
-     * @param Invoice $invoice the invoice to extract the due date from
-     *
-     * @return array|null an array with a `note` key containing "Payment due by YYYY-MM-DD", or `null` if the invoice has no due date
+     * Build payment terms DTO when a due date is present.
      */
-    protected function transformPaymentTerms(Invoice $invoice): ?array
+    protected function transformPaymentTerms(Invoice $invoice): ?EInvoicePaymentTerms
     {
-        if ( ! $invoice->due_date) {
+        if (! $invoice->invoice_due_at) {
             return null;
         }
 
-        return [
-            'note' => "Payment due by {$invoice->due_date->format('Y-m-d')}",
-        ];
+        $dueDate = $invoice->invoice_due_at->format('Y-m-d');
+
+        return new EInvoicePaymentTerms(
+            note:    "Payment due by {$dueDate}",
+            dueDate: $dueDate,
+        );
     }
 }

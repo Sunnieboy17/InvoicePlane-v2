@@ -907,4 +907,128 @@ return [
     'tax_rate_type_zero'      => 'Zero Rated',
     'tax_rate_type_exempt'    => 'Exempt',
     #endregion
+
+    #region GERMANY COMPLIANCE (DE §14 UStG)
+    'service_date'            => 'Service Date',
+    'service_period_start'   => 'Service Period Start',
+    'service_period_end'     => 'Service Period End',
+    'vat_id'                => 'VAT ID (USt-IdNr.)',
+    'vat_id_hint'           => 'Format: DE + 9 digits (e.g. DE123456789)',
+    'tax_number'            => 'Tax Number (Steuernummer)',
+    #endregion
+
+    #region INVOICE VALIDATION (RB-IMP-06)
+    'validation_customer_required'              => 'A customer is required.',
+    'validation_invoice_number_required'        => 'An invoice number is required.',
+    'validation_invoice_date_required'          => 'An invoice date is required.',
+    'validation_due_date_required'             => 'A due date is required.',
+    'validation_due_date_before_invoice_date'  => 'Due date cannot be before invoice date.',
+    'validation_invoice_items_required'         => 'At least one invoice item is required.',
+    'validation_company_required'               => 'Company settings are required.',
+    'validation_company_name_required'          => 'Company name is required.',
+    'validation_customer_name_required'         => 'Customer company name is required.',
+    'validation_cannot_finalize'               => 'Cannot finalize invoice: missing required fields.',
+    #endregion
+
+    #region BANK DETAILS & PAYMENT TERMS (RB-IMP-08)
+    'bank_details'           => 'Bank Details',
+    'bank_name'             => 'Bank Name',
+    'account_holder'        => 'Account Holder',
+    'payment_terms'         => 'Payment Terms',
+    'payment_days'          => 'Payment Terms (Days)',
+    'payment_terms_text'    => 'Payment Terms Text',
+    #endregion
+
+    #region BUSINESS REFERENCE FIELDS (RB-IMP-09)
+    'business_references'  => 'Business References',
+    'buyer_reference'       => 'Buyer Reference',
+    'order_reference'       => 'Order Reference',
+    'project_reference'     => 'Project Reference',
+    #endregion
+
+    #region E-INVOICE STATUS UI (RB-IMP-13)
+    'einvoice_status'                      => 'E-Invoice Status',
+    'einvoice_status_not_ready'            => 'Not Ready',
+    'einvoice_status_partially_ready'       => 'Partially Ready',
+    'einvoice_status_export_ready'          => 'Export Ready',
+    'einvoice_status_export_failed'         => 'Export Failed',
+    'einvoice_status_export_failed_hint'    => 'Last export attempt failed. Please check the errors and try again.',
+    'einvoice_export'                       => 'Export E-Invoice',
+    'einvoice_export_format'                => 'Export Format',
+    'einvoice_error_no_company'             => 'Company data is required.',
+    'einvoice_error_company_vat'            => 'Company VAT ID is required.',
+    'einvoice_error_company_name'           => 'Company name is required.',
+    'einvoice_error_no_customer'            => 'Customer data is required.',
+    'einvoice_error_customer_name'          => 'Customer company name is required.',
+    'einvoice_warning_customer_vat'         => 'Customer VAT ID is recommended for B2B invoices.',
+    'einvoice_warning_peppol_id'           => 'Peppol ID is recommended for automatic routing.',
+    'einvoice_warning_iban'                 => 'IBAN is recommended for SEPA payments.',
+    'einvoice_missing_fields'               => 'Missing Required Fields',
+    'einvoice_recommended_fields'           => 'Recommended Fields',
+    #endregion
+
+    #region INCOMING XML UPLOAD (RB-IMP-14)
+    'upload_xml_invoice'                   => 'Upload XML Invoice',
+    'upload_xml_description'               => 'Upload an XML invoice file (XRechnung, ZUGFeRD) to parse and preview its contents.',
+    'upload_new_file'                      => 'Upload New File',
+    'supported_formats'                    => 'Supported formats:',
+    'parse_result'                         => 'Parse Result',
+    'detected_format'                      => 'Detected Format',
+    'filename'                             => 'Filename',
+    'invoice_details'                      => 'Invoice Details',
+    'invoice_type'                         => 'Invoice Type',
+    'parties'                              => 'Parties',
+    'seller'                               => 'Seller',
+    'buyer'                                => 'Buyer',
+    'country'                              => 'Country',
+    'totals'                               => 'Totals',
+    'line_total'                           => 'Line Total',
+    'tax_total'                            => 'Tax Total',
+    'grand_total'                          => 'Grand Total',
+    'amount_due'                           => 'Amount Due',
+    'line_items'                           => 'Line Items',
+    'items_count'                          => 'Number of Items',
+    'warnings'                             => 'Warnings',
+    'errors'                               => 'Errors',
+    'parse_success'                        => 'Parse Successful',
+    'parse_success_body'                   => 'XML parsed successfully. Review the extracted data below.',
+    'parse_warning'                        => 'Parse with Warnings',
+    'parse_warning_body'                   => 'XML parsed with some warnings. Please review missing fields.',
+    'parse_error'                          => 'Parse Error',
+    'parse_error_body'                     => 'Failed to parse XML. Please check the file format.',
+    'upload_failed'                        => 'Upload Failed',
+    'incoming_xml_invoice'                 => 'Incoming E-Invoice',
+    #endregion
+
+    #region CREDIT NOTE / CANCELLATION (RB-IMP-15)
+    'credit_note'                          => 'Credit Note',
+    'credit_notes'                         => 'Credit Notes',
+    'create_credit_note'                   => 'Create Credit Note',
+    'credit_note_for'                      => 'Credit Note for Invoice',
+    'original_invoice'                      => 'Original Invoice',
+    'cancellation'                         => 'Cancellation',
+    'cancellation_reason'                  => 'Cancellation Reason',
+    #endregion
+
+    #region B2B E-INVOICE TRANSITION (RB-IMP-16)
+    'transition_status'                    => 'E-Invoice Transition Status',
+    'transition_not_applicable'            => 'Not Applicable',
+    'transition_review_required'            => 'Review Required',
+    'transition_einvoice_recommended'       => 'E-Invoice Recommended',
+    'transition_einvoice_expected'          => 'E-Invoice Expected',
+    'transition_b2b_context'               => 'B2B Context',
+    'transition_domestic'                  => 'Domestic Transaction',
+    'transition_eu_cross_border'           => 'EU Cross-Border',
+    'transition_info'                       => 'This is a product guidance and does not constitute legal advice.',
+    #endregion
+
+    #region PEPPOL TRANSPORT (RB-IMP-17)
+    'peppol_transport'                     => 'Peppol Transport',
+    'peppol_endpoint'                      => 'Peppol Endpoint',
+    'peppol_access_point'                   => 'Access Point',
+    'peppol_status'                        => 'Peppol Status',
+    'peppol_sending'                       => 'Sending',
+    'peppol_delivered'                     => 'Delivered',
+    'peppol_failed'                        => 'Failed',
+    #endregion
 ];

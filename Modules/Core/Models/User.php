@@ -192,8 +192,6 @@ class User extends Authenticatable implements FilamentUser, HasAvatar, HasName, 
         if ($this->isSuperAdmin()) {
             return true;
         }
-        dd('test 900001');
-
         return $this->companies()->whereKey($tenant->getKey())->exists();
     }
 
