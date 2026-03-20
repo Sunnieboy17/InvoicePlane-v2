@@ -51,7 +51,7 @@ class CompanyForm
                                     ->label(trans('ip.vat_id'))
                                     ->hint(trans('ip.vat_id_hint'))
                                     ->nullable()
-                                    ->rules([\Modules\Core\Rules\GermanVatId::class]),
+                                    ->rule(new \Modules\Core\Rules\GermanVatId()),
 
                                 TextInput::make('id_number')
                                     ->label(trans('ip.id_number'))
